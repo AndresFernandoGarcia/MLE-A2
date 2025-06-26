@@ -2,7 +2,7 @@
 - This is an assignment for Machine Learning Engineering.
 - The main objective was to continue building a machine learning pipeline with different technologies and as a final test to combine all of what we have learned.
 
-### Links to systems used: 
+### Links:
 <p>localhost:8000 (MLflow)</p>
 <p>localhost:8080 (Apache Airflow) </p>
 
