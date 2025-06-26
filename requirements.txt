@@ -1,0 +1,10 @@
+numpy
+pandas
+matplotlib
+seaborn
+scipy
+scikit-learn
+pyspark
+xgboost
+tqdm==4.67.1
+mlflow==2.13.0

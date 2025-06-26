@@ -1,0 +1,6 @@
+{
+  "model_train_date_str": "2024-09-01",
+  "train_test_period_months": 12,
+  "oot_period_months": 2,
+  "train_test_ratio": 0.8
+}

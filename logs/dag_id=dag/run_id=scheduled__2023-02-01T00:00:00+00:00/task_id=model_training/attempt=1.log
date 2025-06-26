@@ -1,0 +1,23 @@
+[2025-06-26T14:17:15.380+0000] {taskinstance.py:1159} INFO - Dependencies all met for dep_context=non-requeueable deps ti=<TaskInstance: dag.model_training scheduled__2023-02-01T00:00:00+00:00 [queued]>
+[2025-06-26T14:17:15.382+0000] {taskinstance.py:1159} INFO - Dependencies all met for dep_context=requeueable deps ti=<TaskInstance: dag.model_training scheduled__2023-02-01T00:00:00+00:00 [queued]>
+[2025-06-26T14:17:15.382+0000] {taskinstance.py:1361} INFO - Starting attempt 1 of 2
+[2025-06-26T14:17:15.388+0000] {taskinstance.py:1382} INFO - Executing <Task(BashOperator): model_training> on 2023-02-01 00:00:00+00:00
+[2025-06-26T14:17:15.390+0000] {standard_task_runner.py:57} INFO - Started process 23493 to run task
+[2025-06-26T14:17:15.391+0000] {standard_task_runner.py:84} INFO - Running: ['airflow', 'tasks', 'run', 'dag', 'model_training', 'scheduled__2023-02-01T00:00:00+00:00', '--job-id', '104', '--raw', '--subdir', 'DAGS_FOLDER/dag.py', '--cfg-path', '/tmp/tmp0arldvkg']
+[2025-06-26T14:17:15.392+0000] {standard_task_runner.py:85} INFO - Job 104: Subtask model_training
+[2025-06-26T14:17:15.407+0000] {task_command.py:416} INFO - Running <TaskInstance: dag.model_training scheduled__2023-02-01T00:00:00+00:00 [running]> on host 6657708b9f9e
+[2025-06-26T14:17:15.428+0000] {taskinstance.py:1662} INFO - Exporting env vars: AIRFLOW_CTX_DAG_OWNER='airflow' AIRFLOW_CTX_DAG_ID='dag' AIRFLOW_CTX_TASK_ID='model_training' AIRFLOW_CTX_EXECUTION_DATE='2023-02-01T00:00:00+00:00' AIRFLOW_CTX_TRY_NUMBER='1' AIRFLOW_CTX_DAG_RUN_ID='scheduled__2023-02-01T00:00:00+00:00'
+[2025-06-26T14:17:15.429+0000] {subprocess.py:63} INFO - Tmp dir root location: /tmp
+[2025-06-26T14:17:15.429+0000] {subprocess.py:75} INFO - Running command: ['/bin/bash', '-c', 'cd /opt/airflow && python src/model_train.py --config configs/default_train.json']
+[2025-06-26T14:17:15.431+0000] {subprocess.py:86} INFO - Output:
+[2025-06-26T14:17:15.469+0000] {subprocess.py:93} INFO - python: can't open file 'src/model_train.py': [Errno 2] No such file or directory
+[2025-06-26T14:17:15.470+0000] {subprocess.py:97} INFO - Command exited with return code 2
+[2025-06-26T14:17:15.474+0000] {taskinstance.py:1937} ERROR - Task failed with exception
+Traceback (most recent call last):
+  File "/home/airflow/.local/lib/python3.8/site-packages/airflow/operators/bash.py", line 210, in execute
+    raise AirflowException(
+airflow.exceptions.AirflowException: Bash command failed. The command returned a non-zero exit code 2.
+[2025-06-26T14:17:15.475+0000] {taskinstance.py:1400} INFO - Marking task as UP_FOR_RETRY. dag_id=dag, task_id=model_training, execution_date=20230201T000000, start_date=20250626T141715, end_date=20250626T141715
+[2025-06-26T14:17:15.480+0000] {standard_task_runner.py:104} ERROR - Failed to execute job 104 for task model_training (Bash command failed. The command returned a non-zero exit code 2.; 23493)
+[2025-06-26T14:17:15.493+0000] {local_task_job_runner.py:228} INFO - Task exited with return code 1
+[2025-06-26T14:17:15.498+0000] {taskinstance.py:2778} INFO - 0 downstream tasks scheduled from follow-on schedule check
