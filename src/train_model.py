@@ -2,46 +2,64 @@ import os
 import sys
 import glob
 import pickle
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
 import json
 import argparse
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
+
 import pandas as pd
-import pyspark
 import numpy as np
+import pyspark
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
+
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, make_scorer
+
 import xgboost as xgb
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+
 import mlflow
 import mlflow.sklearn
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-def get_config(config_path):   
+def get_config(config_path):
     """
-    Load and return the configuration dictionary.
-    """ 
+    Load training configuration. Expects keys:
+      model_train_date_str, oot_period_months, train_test_period_months,
+      train_test_ratio, model_type, search_space.
+    """
     try:
         with open(config_path, 'r') as f:
             cfg = json.load(f)
-        # parse dates
-        cfg['model_train_date'] = datetime.strptime(cfg['model_train_date_str'], "%Y-%m-%d")
-        cfg['oot_end_date'] = cfg['model_train_date'] - timedelta(days=1)
-        cfg['oot_start_date'] = cfg['model_train_date'] - relativedelta(months=cfg['oot_period_months'])
-        cfg['train_test_end_date'] = cfg['oot_start_date'] - timedelta(days=1)
-        cfg['train_test_start_date'] = cfg['oot_start_date'] - relativedelta(months=cfg['train_test_period_months'])
-        print("Config file loaded succesfully!")
-        return cfg
-
-    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+    except (FileNotFoundError, json.JSONDecodeError) as e:
         print(f"[ERROR] Failed to load config: {e}")
         sys.exit(1)
 
+    # parse dates
+    cfg['model_train_date'] = datetime.strptime(cfg['model_train_date_str'], "%Y-%m-%d")
+    cfg['oot_end_date'] = cfg['model_train_date'] - timedelta(days=1)
+    cfg['oot_start_date'] = cfg['model_train_date'] - relativedelta(months=cfg['oot_period_months'])
+    cfg['train_test_end_date'] = cfg['oot_start_date'] - timedelta(days=1)
+    cfg['train_test_start_date'] = cfg['oot_start_date'] - relativedelta(months=cfg['train_test_period_months'])
 
-def init_spark(app_name="dev"):
+    # validate model_type
+    valid_models = ['xgboost', 'random_forest', 'logistic_regression']
+    if cfg.get('model_type') not in valid_models:
+        print(f"[ERROR] model_type must be one of {valid_models}")
+        sys.exit(1)
+
+    # ensure search_space provided
+    if 'search_space' not in cfg or not isinstance(cfg['search_space'], dict):
+        print("[ERROR] search_space must be defined as a dict in config")
+        sys.exit(1)
+
+    return cfg
+
+def init_spark(app_name="train"):
     """
     Initialize and return a SparkSession.
     """
@@ -56,39 +74,46 @@ def init_spark(app_name="dev"):
 def preprocess_data(config, spark):
     """
     Load, filter, and split data into train-test and OOT sets.
-    Returns X_train_test, y_train_test, X_oot, y_oot as pandas DataFrames/Series.
+    Returns X_tt, y_tt, X_oot, y_oot as pandas DataFrames.
     """
     # load label store
-    folder_path = "datamart/gold/label_store/"
-    files_list = [folder_path+os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]
-    label_store_sdf = spark.read.option("header", "true").parquet(*files_list)
+    folder_path = 'datamart/gold/label_store/'
+    files_list = [folder_path + os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]
+    label_store_sdf = spark.read.option('header', 'true').parquet(*files_list)
 
-    # filter by date window
-    labels_sdf = label_store_sdf.filter((col("snapshot_date") >= config["train_test_start_date"]) & (col("snapshot_date") <= config["oot_end_date"]))
-    
-    feature_location = "datamart/gold/feature_store"
+    # filter by overall date window
+    labels_sdf = label_store_sdf.filter(
+        (col('snapshot_date') >= config['train_test_start_date']) &
+        (col('snapshot_date') <= config['oot_end_date'])
+    )
+
+    # load feature store
+    feature_location = 'datamart/gold/feature_store'
     features_files_list = [
         os.path.join(feature_location, os.path.basename(f))
         for f in glob.glob(os.path.join(feature_location, '*'))
     ]
+    features_store_sdf = spark.read.option('header', 'true').parquet(*features_files_list)
 
-    # Load CSV into DataFrame - connect to feature store
-    features_store_sdf = spark.read.option("header", "true").parquet(*features_files_list)
+    # filter features by same window
+    features_sdf = features_store_sdf.filter(
+        (col('snapshot_date') >= config['train_test_start_date']) &
+        (col('snapshot_date') <= config['oot_end_date'])
+    )
 
-    # extract feature store
-    features_sdf = features_store_sdf.filter((col("snapshot_date") >= config["train_test_start_date"]) & (col("snapshot_date") <= config["oot_end_date"]))
-
+    # convert to pandas and sort
     y_df = labels_sdf.toPandas().sort_values(by='customer_id')
     X_df = features_sdf.toPandas().sort_values(by='customer_id')
 
+    # datetime conversion
     X_df['snapshot_date'] = pd.to_datetime(X_df['snapshot_date'])
     y_df['snapshot_date'] = pd.to_datetime(y_df['snapshot_date'])
 
-    # Simulate inner merge to remove non-existent customer_id's in x and y to standardize df size
+    # simulate inner join
     X_df = X_df[np.isin(X_df['customer_id'], y_df['customer_id'].unique())]
     y_df = y_df[np.isin(y_df['customer_id'], X_df['customer_id'].unique())]
-
-    # OOT split
+   
+   # OOT split
     y_oot = y_df[
         (y_df['snapshot_date'] >= config['oot_start_date']) &
         (y_df['snapshot_date'] <= config['oot_end_date'])
@@ -102,135 +127,123 @@ def preprocess_data(config, spark):
     return X_tt, y_tt, X_oot, y_oot
 
 
-def train_model(X_tt, y_tt, X_oot, y_oot, config):
+def split_train_test(X_tt, y_tt, ratio):
     """
-    Train XGBoost with optional hyperparameter search and return artefact.
+    Performs train/test split and returns scaled arrays plus scaler.
     """
-    X_train, X_test, y_train, y_test = train_test_split(X_tt, y_tt, 
-                                                        test_size=config['train_test_ratio'], 
-                                                        random_state=42, 
-                                                        shuffle=True, 
-                                                        stratify=y_tt['label'])
-
-    X_train = X_train.drop(columns=['customer_id', 'snapshot_date'])
-    X_test = X_test.drop(columns=['customer_id', 'snapshot_date'])
-    X_oot = X_oot.drop(columns=['customer_id', 'snapshot_date'])
-
-    y_train = y_train['label']
-    y_test = y_test['label']
-    y_oot = y_oot['label']
-
-    # standard scaling
+    X = X_tt.drop(columns=['customer_id', 'snapshot_date'])
+    y = y_tt['label']
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X, y, test_size=ratio, stratify=y, random_state=42
+    )
     scaler = StandardScaler()
-    X_train_s = scaler.fit_transform(X_train)
-    X_test_s = scaler.transform(X_test)
-    X_oot_s = scaler.transform(X_oot)
+    X_tr_s = scaler.fit_transform(X_tr)
+    X_te_s = scaler.transform(X_te)
+    return X_tr_s, X_te_s, y_tr, y_te, scaler
 
+
+def get_model_and_params(model_type, search_space):
+    """
+    Returns estimator instance and param_distributions.
+    """
+    if model_type == 'xgboost':
+        est = xgb.XGBClassifier(eval_metric='auc', random_state=42)
+    elif model_type == 'random_forest':
+        est = RandomForestClassifier(random_state=42)
+    elif model_type == 'logistic_regression':
+        est = LogisticRegression(max_iter=1000, random_state=42)
+    else:
+        raise ValueError(f"Unsupported model_type: {model_type}")
+    return est, search_space
+
+
+def train_and_tune(X_tr_s, y_tr, estimator, params):
+    """
+    Runs RandomizedSearchCV and returns best estimator.
+    """
     scorer = make_scorer(roc_auc_score)
-
-    ###### THIS CAN BE A FUNCTION IN ITSELF!!!!! SEPARATE MODELS (LF, RF, AND XGBOOST WITH SPECIFIC HYPERPARAMETERS)
-    # define model and param grid
-    clf = xgb.XGBClassifier(eval_metric='auc', random_state=88)
-    param_dist = {
-        'n_estimators': [25, 50],
-        'max_depth': [2, 3],
-        'learning_rate': [0.01, 0.1],
-        'subsample': [0.6, 0.8],
-        'colsample_bytree': [0.6, 0.8],
-        'gamma': [0, 0.1],
-        'min_child_weight': [1, 3, 5],
-        'reg_alpha': [0, 0.1, 1],
-        'reg_lambda': [1, 1.5, 2]
-    }
-
-    # hyperparameter search
     search = RandomizedSearchCV(
-        estimator=clf,
-        param_distributions=param_dist,
+        estimator=estimator,
+        param_distributions=params,
         scoring=scorer,
         n_iter=100,
         cv=3,
+        n_jobs=-1,
         verbose=1,
-        random_state=42,
-        n_jobs=-1
+        random_state=42
     )
-    search.fit(X_train_s, y_train)
-
-    # best model
-    best = search.best_estimator_
-    ###### THIS CAN BE A FUNCTION IN ITSELF!!!!!
-    # evaluate
-    def auc_score(model, Xd, yd):
-        prob = model.predict_proba(Xd)[:, 1]
-        return roc_auc_score(yd, prob)
-
-    train_auc = auc_score(best, X_train_s, y_train)
-    test_auc = auc_score(best, X_test_s, y_test)
-    oot_auc = auc_score(best, X_oot_s, y_oot)
-
-    model_artefact = {}
-
-    model_artefact['model'] = best
-    model_artefact['model_version'] = "credit_model_"+config["model_train_date_str"].replace('-','_')
-    model_artefact['preprocessing_transformers'] = {}
-    model_artefact['preprocessing_transformers']['stdscaler'] = scaler
-    model_artefact['data_dates'] = config
-    model_artefact['data_stats'] = {}
-    model_artefact['data_stats']['X_train'] = X_train.shape[0]
-    model_artefact['data_stats']['X_test'] = X_test.shape[0]
-    model_artefact['data_stats']['X_oot'] = X_oot.shape[0]
-    model_artefact['data_stats']['y_train'] = round(y_train.mean(),2)
-    model_artefact['data_stats']['y_test'] = round(y_test.mean(),2)
-    model_artefact['data_stats']['y_oot'] = round(y_oot.mean(),2)
-    model_artefact['results'] = {}
-    model_artefact['results']['auc_train'] = train_auc
-    model_artefact['results']['auc_test'] = test_auc
-    model_artefact['results']['auc_oot'] = oot_auc
-    model_artefact['results']['gini_train'] = round(2*train_auc-1,3)
-    model_artefact['results']['gini_test'] = round(2*test_auc-1,3)
-    model_artefact['results']['gini_oot'] = round(2*oot_auc-1,3)
-    model_artefact['hp_params'] = search.best_params_
-
-    return model_artefact
+    search.fit(X_tr_s, y_tr)
+    return search.best_estimator_, search.best_params_
 
 
-def save_model(artefact, directory='model_bank'):
+def evaluate(model, X_s, y, label):
     """
-    Save the model artefact as a pickle file.
+    Evaluate model performance and output AUC score.
     """
-    os.makedirs(directory, exist_ok=True)
-    version = artefact['model_version']
-    path = os.path.join(directory, f"{version}.pkl")
+    prob = model.predict_proba(X_s)[:, 1]
+    auc = roc_auc_score(y, prob)
+    print(f"{label} AUC: {auc:.4f}")
+    return auc
+
+
+def save_artefact(model, scaler, config, best_params, stats):
+    """
+    Save artefact elements.
+    """
+    artefact = {
+        'model': model,
+        'preprocessing_transformers': {'stdscaler': scaler},
+        'model_version': 'credit_model_' + config['model_train_date_str'].replace('-', '_'),
+        'data_dates': config,
+        'hp_params': best_params,
+        'results': stats
+    }
+    os.makedirs('model_bank', exist_ok=True)
+    path = os.path.join('model_bank', artefact['model_version'] + '.pkl')
     with open(path, 'wb') as f:
         pickle.dump(artefact, f)
-    print(f"Model saved to {path}")
+    print(f"Saved model artefact at {path}")
+    return artefact
+
 
 def log_metrics(artefact):
-    print("Logging current model metrics...")
+    """
+    Simple model metrics logging using MLflow. Using port 8000 due to the Apple Corporation using port 5000 on local machin
+    for an unrelated system.
+    """
+    mlflow.set_tracking_uri(os.getenv('MLFLOW_TRACKING_URI', 'http://localhost:8000'))
+    mlflow.set_experiment(artefact['model_version'])
     with mlflow.start_run(run_name=artefact['model_version']):
-        mlflow.log_metric("auc_train", artefact["results"]["auc_train"])
-        mlflow.log_metric("auc_test",  artefact["results"]["auc_test"])
-        mlflow.log_metric("auc_oot",   artefact["results"]["auc_oot"])
+        for k, v in artefact['results'].items():
+            mlflow.log_metric(k, v)
+
 
 def main(config_path):
-    """
-    Main entry point: load config, init Spark, preprocess, train, and save.
-    """
-    # Get config
     cfg = get_config(config_path)
-    # Set up spark
     spark = init_spark()
     X_tt, y_tt, X_oot, y_oot = preprocess_data(cfg, spark)
-    artefact = train_model(X_tt, y_tt, X_oot, y_oot, cfg)
-    # Set up MLflow
-    print("ML Flow is running...")
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:8000"))
-    mlflow.set_experiment(artefact['model_version'])
+
+    # split train/test
+    X_tr_s, X_te_s, y_tr, y_te, scaler = split_train_test(X_tt, y_tt, cfg['train_test_ratio'])
+
+    # get model + params
+    estimator, param_dist = get_model_and_params(cfg['model_type'], cfg['search_space'])
+
+    # tune
+    best_model, best_params = train_and_tune(X_tr_s, y_tr, estimator, param_dist)
+
+    # evaluate
+    stats = {}
+    stats['auc_train'] = evaluate(best_model, X_tr_s, y_tr, 'Train')
+    stats['auc_test'] = evaluate(best_model, X_te_s, y_te, 'Test')
+    X_oot_s = scaler.transform(X_oot.drop(columns=['customer_id', 'snapshot_date']))
+    stats['auc_oot'] = evaluate(best_model, X_oot_s, y_oot['label'], 'OOT')
+
+    artefact = save_artefact(best_model, scaler, cfg, best_params, stats)
     log_metrics(artefact)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="configs/default_train.json", help="Path to config JSON")
+    parser.add_argument('--config', type=str, default='configs/default_train_test.json')
     args = parser.parse_args()
     main(args.config)
-

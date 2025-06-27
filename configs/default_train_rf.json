@@ -1,0 +1,15 @@
+{
+  "model_train_date_str": "2024-12-01",
+  "train_test_period_months": 24,
+  "oot_period_months": 2,
+  "train_test_ratio": 0.8,
+  "model_type": "random_forest",
+  "search_space": {
+      "n_estimators":[100, 300, 500],
+      "max_depth":[null, 10, 20, 30],
+      "min_samples_split":[2, 5, 10],
+      "min_samples_leaf":[1, 2, 4],
+      "max_features":["sqrt", "log2"],
+      "bootstrap":[true, false]
+    }
+}

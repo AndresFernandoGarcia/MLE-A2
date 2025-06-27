@@ -1,0 +1,15 @@
+{
+  "model_train_date_str": "2024-12-01",
+  "train_test_period_months": 24,
+  "oot_period_months": 2,
+  "train_test_ratio": 0.8,
+  "model_type": "logistic_regression",
+  "search_space":{
+      "C":[0.01, 0.1, 1, 10, 100],
+      "penalty":["l1", "l2", "elasticnet", "none"],
+      "solver":["saga"],
+      "l1_ratio":[0.0, 0.5, 1.0],
+      "class_weight":[null, "balanced"],
+      "max_iter":[100, 200, 500]
+    }
+}
