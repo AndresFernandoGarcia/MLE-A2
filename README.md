@@ -2,7 +2,8 @@
 - This is an assignment for Machine Learning Engineering.
 - The main objective was to continue building a machine learning pipeline with different technologies and as a final test to combine all of what we have learned.
 
-### Overall Proces: 
+### Overall Process: 
+#### NEED TO BUILD DATAMART FIRST SO FOLLOW THESE STEPS
 <p>Initiate Docker Container for effective model tracking and airflow functionality</p>
 <p>If manual test: run "python src/preprocessing.py" to build the datamart with the current available data (can be changed in preprocess.json).</p>
 <p>Then run "python src/train_model.py" to run xgboost model training. These settings can be changed within a json file. Check default_model_train.json for structure.</p>
@@ -15,6 +16,9 @@
 
 ### Project Repository
 https://github.com/AndresFernandoGarcia/MLE-A2
+
+### Config Files
+<p> There are many config files for each script (preprocess, train_model, inference) but for train_model.py there are 3 config files with one being default and the other 2 being different model runs i.e random forest and logistic regression. </p>
 
 ### Special Thanks to JENNIFER POERNOMO for providing the original code which this project is based on
 <p> Her original code was used as the basis for this project. It is modified, however, similarities will nonetheless be present. Similarities will be found during the preprocessing stages. Beyond that the way data is split will also be reminiscent of her original code.</p>
