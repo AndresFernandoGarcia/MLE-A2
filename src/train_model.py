@@ -41,6 +41,7 @@ def get_config(config_path):
         sys.exit(1)
 
     # parse dates
+    cfg['start_date_str'] = cfg['start_date']
     cfg['start_date'] = datetime.strptime(cfg['start_date'], "%Y-%m-%d")
     cfg['oot_end_date'] = cfg['start_date'] - timedelta(days=1)
     cfg['oot_start_date'] = cfg['start_date'] - relativedelta(months=cfg['oot_period_months'])
@@ -194,7 +195,7 @@ def save_artefact(model, scaler, config, best_params, stats):
     artefact = {
         'model': model,
         'preprocessing_transformers': {'stdscaler': scaler},
-        'model_version': 'credit_model_' + config['start_date'].replace('-', '_'),
+        'model_version': 'credit_model_' + config['start_date_str'].replace('-', '_'),
         'config': config,
         'hp_params': best_params,
         'results': stats
