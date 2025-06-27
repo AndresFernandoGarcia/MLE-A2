@@ -20,6 +20,7 @@ from sklearn.metrics import roc_auc_score, make_scorer
 import xgboost as xgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 import mlflow
 import mlflow.sklearn
@@ -29,7 +30,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 def get_config(config_path):
     """
     Load training configuration. Expects keys:
-      model_train_date_str, oot_period_months, train_test_period_months,
+      start_date, oot_period_months, train_test_period_months,
       train_test_ratio, model_type, search_space.
     """
     try:
@@ -40,9 +41,9 @@ def get_config(config_path):
         sys.exit(1)
 
     # parse dates
-    cfg['model_train_date'] = datetime.strptime(cfg['model_train_date_str'], "%Y-%m-%d")
-    cfg['oot_end_date'] = cfg['model_train_date'] - timedelta(days=1)
-    cfg['oot_start_date'] = cfg['model_train_date'] - relativedelta(months=cfg['oot_period_months'])
+    cfg['start_date'] = datetime.strptime(cfg['start_date'], "%Y-%m-%d")
+    cfg['oot_end_date'] = cfg['start_date'] - timedelta(days=1)
+    cfg['oot_start_date'] = cfg['start_date'] - relativedelta(months=cfg['oot_period_months'])
     cfg['train_test_end_date'] = cfg['oot_start_date'] - timedelta(days=1)
     cfg['train_test_start_date'] = cfg['oot_start_date'] - relativedelta(months=cfg['train_test_period_months'])
 
@@ -193,8 +194,8 @@ def save_artefact(model, scaler, config, best_params, stats):
     artefact = {
         'model': model,
         'preprocessing_transformers': {'stdscaler': scaler},
-        'model_version': 'credit_model_' + config['model_train_date_str'].replace('-', '_'),
-        'data_dates': config,
+        'model_version': 'credit_model_' + config['start_date'].replace('-', '_'),
+        'config': config,
         'hp_params': best_params,
         'results': stats
     }
@@ -216,6 +217,50 @@ def log_metrics(artefact):
     with mlflow.start_run(run_name=artefact['model_version']):
         for k, v in artefact['results'].items():
             mlflow.log_metric(k, v)
+
+def store_performance_table(artefact, X_tr_s, y_tr, X_te_s, y_te, X_oot_s, y_oot):
+    """
+    Read (or create) a CSV in datamart/gold/model_performance.csv,
+    append this run’s metrics (AUC, precision, recall, F1 on train/test/OOT)
+    and write it back.
+    """
+    perf_dir = 'datamart/gold'
+    perf_file = os.path.join(perf_dir, 'model_performance.csv')
+
+    # compute additional metrics
+    y_tr_pred = artefact['model'].predict(X_tr_s)
+    y_te_pred = artefact['model'].predict(X_te_s)
+    y_oot_pred = artefact['model'].predict(X_oot_s)
+
+    row = {
+        'model_version': artefact['model_version'],
+        'run_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'data_start_date': artefact['config']['train_test_start_date'],
+        'data_end_date': artefact['config']['train_test_end_date'],
+        'auc_train': artefact['results']['auc_train'],
+        'precision_train': precision_score(y_tr, y_tr_pred),
+        'recall_train':    recall_score(y_tr, y_tr_pred),
+        'f1_train':        f1_score(y_tr, y_tr_pred),
+        'auc_test':  artefact['results']['auc_test'],
+        'precision_test':  precision_score(y_te, y_te_pred),
+        'recall_test':     recall_score(y_te, y_te_pred),
+        'f1_test':         f1_score(y_te, y_te_pred),
+        'auc_oot':   artefact['results']['auc_oot'],
+        'precision_oot':   precision_score(y_oot['label'], y_oot_pred),
+        'recall_oot':      recall_score(y_oot['label'], y_oot_pred),
+        'f1_oot':          f1_score(y_oot['label'], y_oot_pred),
+    }
+
+    # load existing or start new
+    if os.path.exists(perf_file):
+        df = pd.read_csv(perf_file)
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    else:
+        df = pd.DataFrame([row])
+
+    os.makedirs(perf_dir, exist_ok=True)
+    df.to_csv(perf_file, index=False)
+    print(f"[INFO] Appended performance to {perf_file}")
 
 
 def main(config_path):
@@ -240,10 +285,11 @@ def main(config_path):
     stats['auc_oot'] = evaluate(best_model, X_oot_s, y_oot['label'], 'OOT')
 
     artefact = save_artefact(best_model, scaler, cfg, best_params, stats)
+    store_performance_table(artefact, X_tr_s, y_tr, X_te_s, y_te, X_oot_s, y_oot)
     log_metrics(artefact)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default='configs/default_train_test.json')
+    parser.add_argument('--config', type=str, default='configs/default_train.json')
     args = parser.parse_args()
     main(args.config)
