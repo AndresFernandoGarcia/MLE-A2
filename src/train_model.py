@@ -30,7 +30,7 @@ def get_config(config_path):
     """
     Load training configuration. Expects keys:
       model_train_date_str, oot_period_months, train_test_period_months,
-      train_test_ratio, model_type, search_space
+      train_test_ratio, model_type, search_space.
     """
     try:
         with open(config_path, 'r') as f:
@@ -60,6 +60,9 @@ def get_config(config_path):
     return cfg
 
 def init_spark(app_name="train"):
+    """
+    Initialize and return a SparkSession.
+    """
     spark = SparkSession.builder \
         .appName(app_name) \
         .master("local[*]") \
@@ -175,7 +178,7 @@ def train_and_tune(X_tr_s, y_tr, estimator, params):
 
 def evaluate(model, X_s, y, label):
     """
-    Evaluate model performance and output AUC score
+    Evaluate model performance and output AUC score.
     """
     prob = model.predict_proba(X_s)[:, 1]
     auc = roc_auc_score(y, prob)
@@ -185,7 +188,7 @@ def evaluate(model, X_s, y, label):
 
 def save_artefact(model, scaler, config, best_params, stats):
     """
-    Save artefact elements
+    Save artefact elements.
     """
     artefact = {
         'model': model,
@@ -206,7 +209,7 @@ def save_artefact(model, scaler, config, best_params, stats):
 def log_metrics(artefact):
     """
     Simple model metrics logging using MLflow. Using port 8000 due to the Apple Corporation using port 5000 on local machin
-    for an unrelated system
+    for an unrelated system.
     """
     mlflow.set_tracking_uri(os.getenv('MLFLOW_TRACKING_URI', 'http://localhost:8000'))
     mlflow.set_experiment(artefact['model_version'])
@@ -237,10 +240,10 @@ def main(config_path):
     stats['auc_oot'] = evaluate(best_model, X_oot_s, y_oot['label'], 'OOT')
 
     artefact = save_artefact(best_model, scaler, cfg, best_params, stats)
-    # log_metrics(artefact)
+    log_metrics(artefact)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default='configs/default_train.json')
+    parser.add_argument('--config', type=str, default='configs/default_train_test.json')
     args = parser.parse_args()
     main(args.config)

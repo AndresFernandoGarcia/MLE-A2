@@ -14,7 +14,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 def get_config(config_path):
     """
     Load inference configuration.
-    Expects JSON with keys: model_path, start_date_str, end_date_str, optional output_path.
+    Expects JSON with keys: model_path, start_date, end_date, optional output_path.
     """
     try:
         with open(config_path, 'r') as f:
@@ -24,14 +24,14 @@ def get_config(config_path):
         sys.exit(1)
 
     # Parse dates
-    cfg['start_date'] = datetime.strptime(cfg['start_date_str'], "%Y-%m-%d")
-    cfg['end_date'] = datetime.strptime(cfg['end_date_str'], "%Y-%m-%d")
+    cfg['start_date'] = datetime.strptime(cfg['start_date'], "%Y-%m-%d")
+    cfg['end_date'] = datetime.strptime(cfg['end_date'], "%Y-%m-%d")
     return cfg
 
 
 def init_spark(app_name="inference"):
     """
-    Initialize and return a SparkSession for inference.
+    Initialize and return a SparkSession.
     """
     spark = SparkSession.builder \
         .appName(app_name) \
@@ -105,7 +105,7 @@ def save_predictions(df, cfg):
     """
     output_path = cfg.get(
         'output_path',
-        f"predictions_{cfg['start_date_str']}_{cfg['end_date_str']}.csv"
+        f"predictions_{cfg['start_date']}_{cfg['end_date']}.csv"
     )
     df.to_csv(output_path, index=False)
     print(f"Predictions written to: {output_path}")

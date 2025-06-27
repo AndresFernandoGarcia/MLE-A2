@@ -5,7 +5,6 @@ from tqdm import tqdm
 import sys
 import os
 import json
-# To import utils without issue
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.data_processing_bronze_table import process_bronze_table
 from utils.data_processing_silver_table import process_silver_table
